@@ -130,14 +130,16 @@ impl Iterator for MatchIter {
                     Pattern::Match(_) => return Some((context_ref.clone(), index)),
                     Pattern::Include(ref ctx_ref) => {
                         let ctx_ptr = match *ctx_ref {
-                            ContextReference::Inline(ref ctx_ptr) => ctx_ptr.clone(),
+                            ContextReference::Inline(ref ctx_ptr) => Some(ctx_ptr.clone()),
                             ContextReference::Direct(ref ctx_ptr) => {
-                                ctx_ptr.link.upgrade().unwrap()
+                                ctx_ptr.link.upgrade()
                             }
-                            _ => panic!("Can only iterate patterns after linking: {:?}", ctx_ref),
+                            _ => None, // includes that don't exist are ignored TODO: still panic if not linked //panic!("Can only iterate patterns after linking: {:?}", ctx_ref)
                         };
-                        self.ctx_stack.push(ctx_ptr);
-                        self.index_stack.push(0);
+                        if ctx_ptr.is_some() {
+                            self.ctx_stack.push(ctx_ptr.unwrap());
+                            self.index_stack.push(0);
+                        }
                     }
                 }
             } else {
