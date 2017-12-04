@@ -176,7 +176,7 @@ impl ParseState {
                 for (pat_context_ptr, pat_index) in context_iter(ctx) {
                     let mut pat_context = pat_context_ptr.borrow_mut();
                     let match_pat = pat_context.match_at_mut(pat_index);
-                    // println!("{} - {:?} - {:?}", match_pat.regex_str, match_pat.has_captures, cur_level.captures.is_some());
+                    // println!("{} - {:?} - {:?}", match_pat.regex_str, match_pat.uses_backrefs_captured_from_push, cur_level.captures.is_some());
                     let match_ptr = match_pat as *const MatchPattern;
 
                     // Avoid matching the same pattern twice in the same place, causing an infinite loop
@@ -208,7 +208,7 @@ impl ParseState {
                     }
 
                     match_pat.ensure_compiled_if_possible();
-                    let refs_regex = if match_pat.has_captures && cur_level.captures.is_some() {
+                    let refs_regex = if match_pat.uses_backrefs_captured_from_push && cur_level.captures.is_some() {
                         let &(ref region, ref s) = cur_level.captures.as_ref().unwrap();
                         Some(match_pat.compile_with_refs(region, s))
                     } else {
@@ -476,7 +476,7 @@ impl ParseState {
                                     // pushed the top context onto the stack (indeed, that match may not
                                     // even have had any capture groups which would previously have caused
                                     // a panic)
-                                    if match_pat.has_captures {
+                                    if match_pat.uses_backrefs_captured_from_push {
                                         match_pat.regex = Some(match_pat.compile_with_refs(regions, line));
                                     }
                                 },

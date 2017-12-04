@@ -88,7 +88,7 @@ pub struct MatchIter {
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatchPattern {
-    pub has_captures: bool,
+    pub uses_backrefs_captured_from_push: bool,
     pub regex_str: String,
     #[serde(skip_serializing, skip_deserializing)]
     pub regex: Option<Regex>,
@@ -257,7 +257,7 @@ impl MatchPattern {
     /// May compile the regex if it isn't, panicing if compilation fails.
     #[inline]
     pub fn ensure_compiled_if_possible(&mut self) {
-        if self.regex.is_none() && !self.has_captures {
+        if self.regex.is_none() && !self.uses_backrefs_captured_from_push {
             self.compile_regex();
         }
     }
@@ -303,7 +303,7 @@ mod tests {
     fn can_compile_refs() {
         use onig::{SearchOptions, Regex, Region};
         let pat = MatchPattern {
-            has_captures: true,
+            uses_backrefs_captured_from_push: true,
             regex_str: String::from(r"lol \\ \2 \1 '\9' \wz"),
             regex: None,
             scope: vec![],

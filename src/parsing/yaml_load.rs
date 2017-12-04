@@ -184,7 +184,7 @@ impl SyntaxDefinition {
                     context.patterns.push(Pattern::Include(reference));
                 } else {
                     let pattern = SyntaxDefinition::parse_match_pattern(map, state)?;
-                    if pattern.has_captures {
+                    if pattern.uses_backrefs_captured_from_push {
                         context.uses_backrefs = true;
                     }
                     context.patterns.push(Pattern::Match(pattern));
@@ -272,10 +272,10 @@ impl SyntaxDefinition {
             None
         };
 
-        let mut has_captures = false;
+        let mut uses_backrefs_captured_from_push = false;
         let operation = if let Ok(_) = get_key(map, "pop", Some) {
             // Thanks @wbond for letting me know this is the correct way to check for captures
-            has_captures = state.backref_regex.find(&regex_str).is_some();
+            uses_backrefs_captured_from_push = state.backref_regex.find(&regex_str).is_some();
             MatchOperation::Pop
         } else if let Ok(y) = get_key(map, "push", Some) {
             MatchOperation::Push(SyntaxDefinition::parse_pushargs(y, state)?)
@@ -331,7 +331,7 @@ impl SyntaxDefinition {
             match_map.insert(Yaml::String("match".to_string()), Yaml::String(format!("(?={})", v.as_str().unwrap())));
             match_map.insert(Yaml::String("pop".to_string()), Yaml::Boolean(true));
             let pattern = SyntaxDefinition::parse_match_pattern(&match_map, state)?;
-            if pattern.has_captures {
+            if pattern.uses_backrefs_captured_from_push {
                 context.uses_backrefs = true;
             }
             context.patterns.push(Pattern::Match(pattern));
@@ -342,7 +342,7 @@ impl SyntaxDefinition {
         };
 
         let pattern = MatchPattern {
-            has_captures: has_captures,
+            uses_backrefs_captured_from_push: uses_backrefs_captured_from_push,
             regex_str: regex_str,
             regex: None,
             scope: scope,
