@@ -494,7 +494,31 @@ impl ParseState {
             let ctx_ptr = r.resolve();
             let captures = {
                 let ctx = ctx_ptr.borrow();
-                if ctx.uses_backrefs {
+                let mut uses_backrefs = ctx.uses_backrefs;
+                if !uses_backrefs {
+                    // if any of the included contexts use backrefs on pop patterns, mark this context as using backrefs too
+                    // TODO: do this recursively... and only at link time rather than on every context push...
+                    for pattern in &ctx.patterns {
+                        match *pattern {
+                            Pattern::Include(ref context_ref) => {
+                                let ctx_ptr = match *context_ref {
+                                    ContextReference::Inline(ref ctx_ptr) => ctx_ptr.clone(),
+                                    ContextReference::Direct(ref ctx_ptr) => {
+                                        ctx_ptr.link.upgrade().unwrap()
+                                    }
+                                    _ => continue, // skip this and move onto the next one
+                                };
+                                let context_included = ctx_ptr.borrow();
+                                if context_included.uses_backrefs {
+                                    uses_backrefs = true;
+                                    break;
+                                }
+                            },
+                            _ => (),
+                        }
+                    }
+                }
+                if uses_backrefs {
                     Some((regions.clone(), line.to_owned()))
                 } else {
                     None
@@ -778,5 +802,18 @@ contexts:
             "<top-level.test>",
         ];
         expect_scope_stacks_with_syntax(&line2, &expect2, syntax.to_owned());
+    }
+
+    #[test]
+    fn can_parse_issue104() {
+        let ps = SyntaxSet::load_from_folder("testdata").unwrap();
+        let syntax = ps.find_syntax_by_name("Include Backrefs Used by tests in src/parsing/parser.rs").unwrap();
+
+        let line1 = "<string></string>";
+        let expect = [
+            "<meta.tag.open.xml>, <entity.name.tag.localname.xml>",
+            "<meta.tag.close.xml>, <entity.name.tag.localname.xml>",
+        ];
+        expect_scope_stacks_with_syntax(&line1, &expect, syntax.to_owned());
     }
 }

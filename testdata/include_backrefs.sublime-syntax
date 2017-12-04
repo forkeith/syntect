@@ -1,0 +1,24 @@
+%YAML 1.2
+---
+name: Include Backrefs Used by tests in src/parsing/parser.rs
+scope: text.includebackrefpop.syntect
+contexts:
+  main:
+    - match: '(<)(string)\s*(>)'
+      scope: meta.tag.open.xml
+      captures:
+        1: punctuation.definition.tag.begin.xml
+        2: entity.name.tag.localname.xml
+        3: punctuation.definition.tag.end.xml
+      set:
+        - meta_content_scope: meta.inside-value.string.plist
+        - include: pop-tag-no-children
+
+  pop-tag-no-children:
+    - match: '(</)(\2)\s*(>)'
+      scope: meta.tag.close.xml
+      captures:
+        1: punctuation.definition.tag.begin.xml
+        2: entity.name.tag.localname.xml
+        3: punctuation.definition.tag.end.xml
+      pop: true
