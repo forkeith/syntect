@@ -752,4 +752,17 @@ contexts:
         ];
         expect_scope_stacks_with_syntax(&line2, &expect2, syntax.to_owned());
     }
+
+    #[test]
+    fn can_parse_issue104() {
+        let ps = SyntaxSet::load_from_folder("testdata").unwrap();
+        let syntax = ps.find_syntax_by_name("Include Backrefs Used by tests in src/parsing/parser.rs").unwrap();
+
+        let line1 = "<string></string>";
+        let expect = [
+            "<meta.tag.open.xml>, <entity.name.tag.localname.xml>",
+            "<meta.tag.close.xml>, <entity.name.tag.localname.xml>",
+        ];
+        expect_scope_stacks_with_syntax(&line1, &expect, syntax.to_owned());
+    }
 }
