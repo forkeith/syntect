@@ -467,11 +467,11 @@ impl ParseState {
                 if let Some(ref proto) = proto {
                     uses_backrefs = uses_backrefs || proto.borrow().uses_backrefs;
                 }
-                if uses_backrefs {
+                //if uses_backrefs {
                     Some((regions.clone(), line.to_owned()))
-                } else {
-                    None
-                }
+                //} else {
+                //    None
+                //}
             };
             self.stack.push(StateLevel {
                 context: ctx_ptr,
