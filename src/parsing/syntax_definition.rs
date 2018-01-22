@@ -256,7 +256,7 @@ impl MatchPattern {
 
     fn compile_regex(&mut self) {
         // TODO don't panic on invalid regex
-        println!("compiling {:?}", self.regex_str);
+        //println!("compiling {:?}", self.regex_str);
         let compiled = fancy_regex::Regex::new(&self.regex_str).unwrap();
         self.regex = Some(compiled);
     }
