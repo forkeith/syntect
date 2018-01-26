@@ -216,8 +216,18 @@ impl ParseState {
                     } else {
                         match_pat.regex.as_ref().unwrap()
                     };
+                    //if cfg!(regex_timings) {
+                        use std::time::Instant;
+                        let before = Instant::now();
+                    //}
                     // TODO don't panic on regex error
                     let matched = regex.captures_from_pos(line, *start).unwrap();
+                    //if cfg!(regex_timings) {
+                        //use std::time::Instant;
+                        let duration = Instant::now().duration_since(before);
+                        println!("regex {:?} took {:?} to find {} starting at position {:?}", regex, duration, if matched.is_some() { "a match" } else { "nothing" }, start);
+                    //}
+                    
                     if let Some(captures) = matched {
                         let match_start = captures.pos(0).unwrap().0;
                         let match_end = captures.pos(0).unwrap().1;
