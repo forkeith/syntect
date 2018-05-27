@@ -368,7 +368,15 @@ impl SyntaxDefinition {
                     state,
                     false
                 )?;
-                MatchOperation::Push(vec![ContextReference::Inline(escape_context), SyntaxDefinition::parse_reference(y, state)?])
+                let mut include_context_map = Hash::new();
+                // TODO: copy meta_scope and meta_content_scope from the included context, if they are used...
+                include_context_map.insert(Yaml::String("include".to_string()), y.clone());
+                let include_context = SyntaxDefinition::parse_context(
+                    &vec![Yaml::Hash(include_context_map)],
+                    state,
+                    false
+                )?;
+                MatchOperation::Push(vec![ContextReference::Inline(escape_context), ContextReference::Inline(include_context)])
             } else {
                 return Err(ParseSyntaxError::MissingMandatoryKey("escape"));
             }
