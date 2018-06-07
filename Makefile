@@ -8,6 +8,7 @@ info:
 	$(info themes      | generate default theme pack)
 	$(info packs       | generate default syntax pack)
 	$(info syntest     | run syntax test summary)
+	$(info pull-latest | update submodules and packs and produce syntax test summary)
 
 
 $(SUBMODULES):
@@ -29,3 +30,7 @@ syntest: $(SUBMODULES)
 update-known-failures: $(SUBMODULES)
 	cargo run --release --example syntest -- testdata/Packages testdata/Packages --summary | tee testdata/known_syntest_failures.txt
 
+pull-latest: $(SUBMODULES)
+	git submodule foreach git pull origin master
+	$(MAKE) syntest
+	$(MAKE) assets
