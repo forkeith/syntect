@@ -31,6 +31,9 @@ update-known-failures: $(SUBMODULES)
 	cargo run --release --example syntest -- testdata/Packages testdata/Packages --summary | tee testdata/known_syntest_failures.txt
 
 pull-latest: $(SUBMODULES)
+	#git checkout master
+	git fetch trishume
+	git merge --ff-only trishume/master
 	git submodule foreach git pull origin master
 	$(MAKE) syntest
 	$(MAKE) assets
