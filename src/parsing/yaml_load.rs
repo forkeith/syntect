@@ -205,6 +205,9 @@ impl SyntaxDefinition {
         state: &mut ParserState<'_>,
     ) -> Result<HashMap<String, Context>, ParseSyntaxError> {
         // FIXME: contexts need to be re-evaluated with the new values of the variables
+        //        we now store raw_regex_str on MatchPattern for this purpose
+        //        - perhaps we only need to do so when it actually contains a variable reference
+        //        - otherwise it is an unnecessary waste
         let mut contexts = extends.cloned().unwrap_or_default();
         for (key, value) in map.iter() {
             if let (Some(name), Some(val_vec)) = (key.as_str(), value.as_vec()) {
@@ -460,6 +463,7 @@ impl SyntaxDefinition {
 
         let pattern = MatchPattern::new(
             has_captures,
+            raw_regex.to_string(),
             regex_str,
             scope,
             captures,
@@ -1081,6 +1085,79 @@ mod tests {
                 );
 
                 assert!(match_pat.with_prototype.is_some());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn can_parse_extends_with_overwritten_variables() {
+        let defn: SyntaxDefinition = SyntaxDefinition::load_from_str(
+        "
+            name: base syntax
+            scope: source.base
+            variables:
+              a: 'abc'
+              b: '{{a}}def'
+            contexts:
+              main:
+                - match: '{{b}}'
+                  scope: testing
+        ",
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(defn.name, "base syntax");
+
+        let defn2: SyntaxDefinition = SyntaxDefinition::load_from_str_extended(
+            "
+        name: derived syntax
+        scope: source.derived
+        extends: base-syntax.sublime-syntax
+        variables:
+          a: 'ghi'
+        contexts:
+          main:
+            - meta_append: true
+            - match: '{{a}}'
+              scope: foobar
+        ",
+            Some(&defn),
+            false,
+            None
+        )
+        .unwrap();
+        assert_eq!(defn2.name, "derived syntax");
+        
+        let main = &defn2.contexts["main"];
+        
+        let first_pattern: &Pattern = &main.patterns[0];
+        match *first_pattern {
+            Pattern::Match(ref match_pat) => {
+                assert_eq!(
+                    match_pat.scope,
+                    vec![
+                        Scope::new("testing").unwrap(),
+                    ]
+                );
+
+                assert_eq!("ghidef", match_pat.regex.regex_str());
+            }
+            _ => unreachable!(),
+        }
+
+        let second_pattern: &Pattern = &main.patterns[1];
+        match *second_pattern {
+            Pattern::Match(ref match_pat) => {
+                assert_eq!(
+                    match_pat.scope,
+                    vec![
+                        Scope::new("foobar").unwrap(),
+                    ]
+                );
+
+                assert_eq!("ghi", match_pat.regex.regex_str());
             }
             _ => unreachable!(),
         }

@@ -117,6 +117,7 @@ pub struct MatchIter<'a> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatchPattern {
     pub has_captures: bool,
+    pub raw_regex_str: String,
     pub regex: Regex,
     pub scope: Vec<Scope>,
     pub captures: Option<CaptureMapping>,
@@ -268,6 +269,7 @@ where
 impl MatchPattern {
     pub fn new(
         has_captures: bool,
+        raw_regex_str: String,
         regex_str: String,
         scope: Vec<Scope>,
         captures: Option<CaptureMapping>,
@@ -276,6 +278,7 @@ impl MatchPattern {
     ) -> MatchPattern {
         MatchPattern {
             has_captures,
+            raw_regex_str,
             regex: Regex::new(regex_str),
             scope,
             captures,
@@ -318,6 +321,7 @@ mod tests {
     fn can_compile_refs() {
         let pat = MatchPattern {
             has_captures: true,
+            raw_regex_str: "ignored here".into(),
             regex: Regex::new(r"lol \\ \2 \1 '\9' \wz".into()),
             scope: vec![],
             captures: None,
