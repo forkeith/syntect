@@ -270,9 +270,10 @@ fn test_file(
             }
             if out_opts.debug && !line_only_has_assertion {
                 println!(
-                    "-- debugging line {} -- scope stack: {:?}",
-                    current_line_number, stack
+                    "-- debugging line {} -- scope stack: {:?}, -- parse state: {:?}",
+                    current_line_number, stack, state
                 );
+                println!("{:?}", find_key_for_value(&LazyContexts::context_ids, state.stack[0].context));
             }
             let ops = state.parse_line(&line, ss).unwrap();
             if out_opts.debug && !line_only_has_assertion {
@@ -329,6 +330,13 @@ fn test_file(
     }
 
     res
+}
+
+use std::collections::HashMap;
+
+fn find_key_for_value<'a>(map: &'a HashMap<i32, &'static str>, value: &str) -> Option<&'a i32> {
+    map.iter()
+        .find_map(|(key, &val)| if val == value { Some(key) } else { None })
 }
 
 fn main() {

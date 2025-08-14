@@ -56,7 +56,7 @@ pub enum ParsingError {
 /// [`HighlightState`]: ../highlighting/struct.HighlightState.html
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParseState {
-    stack: Vec<StateLevel>,
+    pub stack: Vec<StateLevel>,
     first_line: bool,
     // See issue #101. Contains indices of frames pushed by `with_prototype`s.
     // Doesn't look at `with_prototype`s below top of stack.
@@ -453,19 +453,17 @@ impl ParseState {
             }
         }
 
-        let (matched, can_cache) = match (match_pat.has_captures, captures) {
+        let (regex, can_cache) = match (match_pat.has_captures, captures) {
             (true, Some(captures)) => {
                 let (region, s) = captures;
-                let regex = match_pat.regex_with_refs(region, s);
-                let matched = regex.search(line, start, line.len(), Some(regions));
-                (matched, false)
+                (&match_pat.regex_with_refs(region, s), false)
             }
             _ => {
-                let regex = match_pat.regex();
-                let matched = regex.search(line, start, line.len(), Some(regions));
-                (matched, true)
+                (match_pat.regex(), true)
             }
         };
+        print!("  executing regex: {:?} at pos {} on line {}", regex.regex_str(), start, line);
+        let matched = regex.search(line, start, line.len(), Some(regions));
 
         if matched {
             let (match_start, match_end) = regions.pos(0).unwrap();
