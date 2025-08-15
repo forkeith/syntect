@@ -391,7 +391,7 @@ impl ParseState {
                 {
                     let (match_start, match_end) = match_region.pos(0).unwrap();
 
-                    // println!("matched pattern {:?} at start {} end {}", match_pat.regex_str, match_start, match_end);
+                    println!("matched pattern {:?} at start {} end {} (pop would loop: {}, min start: {})", match_pat, match_start, match_end, pop_would_loop, min_start);
 
                     if match_start < min_start || (match_start == min_start && pop_would_loop) {
                         // New match is earlier in text than old match,
