@@ -1934,19 +1934,27 @@ contexts:
                     - match: (a)
                       scope: a
                       push: context1
+
                     
                   context1:
-                    - match: ''
-                      push: context1
                     - match: b
                       scope: b
+                    - match: ''
+                      push: context1
+                    - match: ''
+                      pop: 1
+                    - match: c
+                      scope: c
                 "#,
             true,
             None,
         )
         .unwrap();
 
-        expect_scope_stacks_with_syntax("a b", &["<a>", "<b>"], syntax);
+        let syntax_set = link(syntax);
+        let mut state = ParseState::new(&syntax_set.syntaxes()[0]);
+        expect_scope_stacks_for_ops(ops(&mut state, "a bc\n", &syntax_set), &["<a>"]);
+        expect_scope_stacks_for_ops(ops(&mut state, "bc\n", &syntax_set), &["<b>"]);
     }
 
     fn expect_scope_stacks(line_without_newline: &str, expect: &[&str], syntax: &str) {
