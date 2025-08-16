@@ -480,7 +480,7 @@ impl ParseState {
             // this is necessary to avoid infinite looping on dumb patterns
             let does_something = match match_pat.operation {
                 MatchOperation::None => match_start != match_end,
-                MatchOperation::Push(_) => self.stack.len() < 100,
+                //MatchOperation::Push(_) => self.stack.len() < 100,
                 _ => true,
             };
             if can_cache && does_something {
@@ -1921,6 +1921,33 @@ contexts:
         .unwrap();
 
         expect_scope_stacks_with_syntax("aa", &["<a>", "<b>"], syntax);
+    }
+
+    #[test]
+    fn can_avoid_infinite_stack_depth() {
+        let syntax = SyntaxDefinition::load_from_str(
+            r#"
+                name: Stack Depth Test
+                scope: source.stack_depth
+                contexts:
+                  main:
+                    - match: (a)
+                      scope: a
+                      push: context1
+                    - match: b
+                      scope: b
+                  context1:
+                    - match: (?=a)
+                      push: context1
+                    - match: (?=b)
+                      pop: 1
+                "#,
+            true,
+            None,
+        )
+        .unwrap();
+
+        expect_scope_stacks_with_syntax("ab", &["<a>", "<b>"], syntax);
     }
 
     fn expect_scope_stacks(line_without_newline: &str, expect: &[&str], syntax: &str) {
