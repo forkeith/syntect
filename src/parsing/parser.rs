@@ -408,6 +408,15 @@ impl ParseState {
                             && !consuming
                             && matches!(match_pat.operation, MatchOperation::Pop);
 
+                        let push_too_deep = check_pop_loop
+                            && !consuming
+                            && matches!(match_pat.operation, MatchOperation::Push(_))
+                            && self.stack.len() >= 100;
+
+                        if push_too_deep {
+                            return Ok(None);
+                        }
+
                         best_match = Some(RegexMatch {
                             regions: match_region,
                             context: pat_context,
@@ -463,7 +472,7 @@ impl ParseState {
                 (match_pat.regex(), true)
             }
         };
-        print!("  executing regex: {:?} at pos {} on line {}", regex.regex_str(), start, line);
+        // print!("  executing regex: {:?} at pos {} on line {}", regex.regex_str(), start, line);
         let matched = regex.search(line, start, line.len(), Some(regions));
 
         if matched {
@@ -471,6 +480,7 @@ impl ParseState {
             // this is necessary to avoid infinite looping on dumb patterns
             let does_something = match match_pat.operation {
                 MatchOperation::None => match_start != match_end,
+                MatchOperation::Push(_) => self.stack.len() < 100,
                 _ => true,
             };
             if can_cache && does_something {
