@@ -408,9 +408,9 @@ impl ParseState {
                             && !consuming
                             && matches!(match_pat.operation, MatchOperation::Pop);
 
-                        let push_too_deep = check_pop_loop
-                            && !consuming
-                            && matches!(match_pat.operation, MatchOperation::Push(_))
+                        let push_too_deep = //check_pop_loop
+                            //&& !consuming
+                            matches!(match_pat.operation, MatchOperation::Push(_))
                             && self.stack.len() >= 100;
 
                         if push_too_deep {
@@ -480,7 +480,7 @@ impl ParseState {
             // this is necessary to avoid infinite looping on dumb patterns
             let does_something = match match_pat.operation {
                 MatchOperation::None => match_start != match_end,
-                //MatchOperation::Push(_) => self.stack.len() < 100,
+                MatchOperation::Push(_) => self.stack.len() < 100,
                 _ => true,
             };
             if can_cache && does_something {
@@ -1934,20 +1934,19 @@ contexts:
                     - match: (a)
                       scope: a
                       push: context1
+                    
+                  context1:
+                    - match: ''
+                      push: context1
                     - match: b
                       scope: b
-                  context1:
-                    - match: (?=a)
-                      push: context1
-                    - match: (?=b)
-                      pop: 1
                 "#,
             true,
             None,
         )
         .unwrap();
 
-        expect_scope_stacks_with_syntax("ab", &["<a>", "<b>"], syntax);
+        expect_scope_stacks_with_syntax("a b", &["<a>", "<b>"], syntax);
     }
 
     fn expect_scope_stacks(line_without_newline: &str, expect: &[&str], syntax: &str) {
