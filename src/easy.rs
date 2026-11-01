@@ -40,12 +40,17 @@ use std::path::Path;
 ///     print!("{}", escaped);
 /// }
 /// ```
+#[deprecated(
+    since = "6.0.0",
+    note = "Use `syntect::io::HighlightedWriter` instead, which implements `std::io::Write`, supports pluggable renderers, and handles branch-point backtracking"
+)]
 pub struct HighlightLines<'a> {
     highlighter: Highlighter<'a>,
     parse_state: ParseState,
     highlight_state: HighlightState,
 }
 
+#[allow(deprecated)]
 impl<'a> HighlightLines<'a> {
     pub fn new(syntax: &SyntaxReference, theme: &'a Theme) -> HighlightLines<'a> {
         let highlighter = Highlighter::new(theme);

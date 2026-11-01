@@ -10,7 +10,7 @@ use std::fmt::Write;
 use std::ops::Range;
 
 #[inline]
-fn blend_fg_color(fg: Color, bg: Color) -> Color {
+pub(crate) fn blend_fg_color(fg: Color, bg: Color) -> Color {
     if fg.a == 0xff {
         return fg;
     }

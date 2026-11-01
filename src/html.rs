@@ -2,10 +2,12 @@
 use crate::easy::{HighlightFile, HighlightLines};
 use crate::escape::Escape;
 use crate::highlighting::{Color, FontStyle, Style, Theme};
+use crate::io::HighlightedWriter;
 use crate::parsing::{
     lock_global_scope_repo, BasicScopeStackOp, ParseState, Scope, ScopeStack, ScopeStackOp,
     SyntaxReference, SyntaxSet,
 };
+use crate::rendering::{MarkupAdapter, ScopeMarkup, StyledOutput};
 use crate::util::LinesWithEndings;
 use crate::Error;
 use std::fmt::Write;
@@ -49,87 +51,158 @@ use std::path::Path;
 /// }
 /// let output_html = html_generator.finalize();
 /// ```
-pub struct ClassedHTMLGenerator<'a> {
-    syntax_set: &'a SyntaxSet,
-    open_spans: isize,
-    parse_state: ParseState,
-    scope_stack: ScopeStack,
-    html: String,
+
+/// An HTML renderer that produces `<span class="...">` elements with
+/// CSS class names derived from scope atoms.
+pub struct ClassedHTMLScopeRenderer {
     style: ClassStyle,
 }
 
+impl ClassedHTMLScopeRenderer {
+    pub fn new(style: ClassStyle) -> Self {
+        Self { style }
+    }
+}
+
+impl ScopeMarkup for ClassedHTMLScopeRenderer {
+    fn begin_scope(&mut self, atom_strs: &[&str], output: &mut String) {
+        output.push_str("<span class=\"");
+        for (i, atom) in atom_strs.iter().enumerate() {
+            if i != 0 {
+                output.push(' ');
+            }
+            if let ClassStyle::SpacedPrefixed { prefix } = self.style {
+                output.push_str(prefix);
+            }
+            output.push_str(atom);
+        }
+        output.push_str("\">");
+    }
+
+    fn end_scope(&mut self, output: &mut String) {
+        output.push_str("</span>");
+    }
+
+    fn write_text(&mut self, text: &str, output: &mut String) {
+        write!(output, "{}", Escape(text)).expect("writing to a String never fails");
+    }
+}
+
+/// Inline-styled HTML renderer via [`StyledOutput`].
+///
+/// Emits `<span style="...">` elements with inline CSS for colours and font
+/// styling. Pair with [`crate::io::HighlightedWriter::from_themed`].
+///
+/// `default_bg` is the background colour of the containing element; the
+/// `background-color` CSS property is only emitted when the token's
+/// background differs from this default.
+///
+/// Adjacent text tokens with the same resolved [`Style`] are automatically
+/// merged into a single `<span>`. Whitespace-only tokens additionally fold
+/// into the previous span when their backgrounds match, even when the
+/// foreground differs — whitespace doesn't reveal a foreground difference.
+pub struct HtmlStyledOutput {
+    default_bg: Color,
+}
+
+impl HtmlStyledOutput {
+    /// Create a new inline HTML emitter.
+    ///
+    /// `default_bg` is the background colour of the containing element.
+    pub fn new(default_bg: Color) -> Self {
+        Self { default_bg }
+    }
+
+    /// Returns the configured default background colour.
+    pub fn default_bg(&self) -> Color {
+        self.default_bg
+    }
+}
+
+impl StyledOutput for HtmlStyledOutput {
+    fn begin_style(&mut self, style: Style, output: &mut String) {
+        output.push_str("<span style=\"");
+        if style.background != self.default_bg {
+            output.push_str("background-color:");
+            write_css_color(output, style.background);
+            output.push(';');
+        }
+        if style.font_style.contains(FontStyle::UNDERLINE) {
+            output.push_str("text-decoration:underline;");
+        }
+        if style.font_style.contains(FontStyle::BOLD) {
+            output.push_str("font-weight:bold;");
+        }
+        if style.font_style.contains(FontStyle::ITALIC) {
+            output.push_str("font-style:italic;");
+        }
+        output.push_str("color:");
+        write_css_color(output, style.foreground);
+        output.push_str(";\">");
+    }
+
+    fn end_style(&mut self, output: &mut String) {
+        output.push_str("</span>");
+    }
+
+    fn write_text(&mut self, text: &str, output: &mut String) {
+        write!(output, "{}", Escape(text)).expect("writing to a String never fails");
+    }
+
+    fn should_merge(&self, prev: Style, next: Style, _text: &str) -> bool {
+        prev == next
+    }
+}
+
+/// HTML-specific convenience wrapper around [`HighlightedWriter`].
+///
+/// Uses [`ClassedHTMLScopeRenderer`] to produce `<span class="...">` output with
+/// CSS class names derived from scope atoms.
+///
+/// Note that because CSS classes have slightly different matching semantics
+/// than Textmate themes, this may produce somewhat less accurate
+/// highlighting than the other highlighting functions which directly use
+/// inline colors as opposed to classes and a stylesheet.
+pub struct ClassedHTMLGenerator<'a> {
+    inner: HighlightedWriter<'a, MarkupAdapter<ClassedHTMLScopeRenderer>>,
+}
+
 impl<'a> ClassedHTMLGenerator<'a> {
-    #[deprecated(since = "4.2.0", note = "Please use `new_with_class_style` instead")]
-    pub fn new(
-        syntax_reference: &'a SyntaxReference,
-        syntax_set: &'a SyntaxSet,
-    ) -> ClassedHTMLGenerator<'a> {
-        Self::new_with_class_style(syntax_reference, syntax_set, ClassStyle::Spaced)
+    pub fn new(syntax: &'a SyntaxReference, syntax_set: &'a SyntaxSet, style: ClassStyle) -> Self {
+        Self {
+            inner: HighlightedWriter::from_markup(
+                syntax,
+                syntax_set,
+                ClassedHTMLScopeRenderer::new(style),
+            )
+            .build(),
+        }
     }
 
     pub fn new_with_class_style(
         syntax_reference: &'a SyntaxReference,
         syntax_set: &'a SyntaxSet,
         style: ClassStyle,
-    ) -> ClassedHTMLGenerator<'a> {
-        let parse_state = ParseState::new(syntax_reference);
-        let open_spans = 0;
-        let html = String::new();
-        let scope_stack = ScopeStack::new();
-        ClassedHTMLGenerator {
-            syntax_set,
-            open_spans,
-            parse_state,
-            scope_stack,
-            html,
-            style,
-        }
+    ) -> Self {
+        Self::new(syntax_reference, syntax_set, style)
     }
 
-    /// Parse the line of code and update the internal HTML buffer with tagged HTML
-    ///
-    /// *Note:* This function requires `line` to include a newline at the end and
-    /// also use of the `load_defaults_newlines` version of the syntaxes.
     pub fn parse_html_for_line_which_includes_newline(&mut self, line: &str) -> Result<(), Error> {
-        let parsed_line = self.parse_state.parse_line(line, self.syntax_set)?.ops;
-        let (formatted_line, delta) = line_tokens_to_classed_spans(
-            line,
-            parsed_line.as_slice(),
-            self.style,
-            &mut self.scope_stack,
-        )?;
-        self.open_spans += delta;
-        self.html.push_str(formatted_line.as_str());
-
+        std::io::Write::write_all(&mut self.inner, line.as_bytes())?;
+        std::io::Write::flush(&mut self.inner)?;
         Ok(())
     }
 
-    /// Parse the line of code and update the internal HTML buffer with tagged HTML
-    ///
-    /// ## Warning
-    /// Due to an unfortunate oversight this function adds a newline after the HTML line,
-    /// and thus requires lines to be passed without newlines in them, and thus requires
-    /// usage of the `load_defaults_nonewlines` version of the default syntaxes.
-    ///
-    /// These versions of the syntaxes can have occasionally incorrect highlighting
-    /// but this function can't be changed without breaking compatibility so is deprecated.
-    #[deprecated(
-        since = "4.5.0",
-        note = "Please use `parse_html_for_line_which_includes_newline` instead"
-    )]
     pub fn parse_html_for_line(&mut self, line: &str) {
-        self.parse_html_for_line_which_includes_newline(line)
-            .expect("Please use `parse_html_for_line_which_includes_newline` instead");
-        // retain newline
-        self.html.push('\n');
+        let _ = self.parse_html_for_line_which_includes_newline(line);
     }
 
-    /// Close all open `<span>` tags and return the finished HTML string
-    pub fn finalize(mut self) -> String {
-        for _ in 0..self.open_spans {
-            self.html.push_str("</span>");
-        }
-        self.html
+    pub fn finalize(self) -> String {
+        let bytes = self
+            .inner
+            .into_inner()
+            .expect("renderer produces valid UTF-8");
+        String::from_utf8(bytes).expect("renderer produces valid UTF-8")
     }
 }
 
