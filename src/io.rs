@@ -17,7 +17,56 @@
 //! For HTML output, see [`crate::html::ClassedHTMLGenerator`],
 //! [`crate::html::ClassedHTMLScopeRenderer`], and
 //! [`crate::html::HtmlStyledOutput`].
-
+///
+/// ## Incremental highlighting (caching parse state)
+///
+/// Both [`ParseState`] and [`ScopeStack`] are [`Clone`], so you can cache them
+/// at clean line boundaries and resume later without re-parsing from the start
+/// of the document. This is useful for editor-style incremental highlighting
+/// where only the changed region needs re-parsing.
+///
+/// ```no_run
+/// use syntect::io::HighlightedWriter;
+/// use syntect::highlighting::ThemeSet;
+/// use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
+/// use syntect::rendering::AnsiStyledOutput;
+///
+/// // 1. Save state at a clean line boundary (not mid-speculation).
+/// let mut w = HighlightedWriter::from_themed(
+///     syntax,
+///     &ss,
+///     &ts.themes["base16-ocean.dark"],
+///     AnsiStyledOutput::Transparent,
+/// )
+/// .build();
+/// w.write_all(b"fn main() {}\n")?;
+/// let cached: (ParseState, ScopeStack) = w.state().clone();
+///
+/// // 2. Later, restore on a new writer and continue from where you left off.
+/// let mut w2 = HighlightedWriter::from_themed(
+///     syntax,
+///     &ss,
+///     &ts.themes["base16-ocean.dark"],
+///     AnsiStyledOutput::Transparent,
+/// )
+/// .with_state(cached.0, cached.1)
+/// .build();
+/// w2.write_all(b"let x = 1;\n")?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// Caveats:
+///
+/// - Only cache at **non-speculative** boundaries
+///   (`!parse_state.is_speculative()`). Mid-speculation state loses its
+///   branch-point snapshot on restore.
+/// - [`with_state`] is on the builder, so you construct a **new**
+///   [`HighlightedWriter`] to restore state — you cannot hot-swap state on an
+///   existing writer mid-stream.
+/// - `line_index` resets to 0 and pending buffers are cleared on restore;
+///   track line numbers yourself if you need them.
+/// - The renderer's style stack is replayed from the restored scope stack, so
+///   colors and spans match correctly.
 use crate::highlighting::Theme;
 use crate::parsing::{
     lock_global_scope_repo, ParseState, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet,
@@ -269,6 +318,13 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriterBuilder<'a, R, W> {
     /// checkpoints and want to pick up from where a previous run left off.
     /// The renderer's internal state (e.g. a `ThemedRenderer`'s style stack)
     /// is replayed to match the restored scope stack.
+    ///
+    /// This is on the builder, so you construct a new [`HighlightedWriter`]
+    /// to restore state rather than hot-swapping on an existing writer.
+    /// `line_index` resets to 0 and pending buffers are cleared; track line
+    /// numbers yourself if you need them. Only restore state captured at
+    /// non-speculative boundaries (`!parse_state.is_speculative()`) —
+    /// mid-speculation state loses its branch-point snapshot.
     pub fn with_state(mut self, parse_state: ParseState, scope_stack: ScopeStack) -> Self {
         self.state = Some((parse_state, scope_stack));
         self
@@ -345,6 +401,11 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriter<'a, R, W> {
     }
 
     /// Returns references to the current parse and scope state.
+    ///
+    /// Both [`ParseState`] and [`ScopeStack`] are [`Clone`], so you can cache
+    /// the returned values at clean line boundaries (when
+    /// `!parse_state.is_speculative()`) and resume later with
+    /// [`HighlightedWriterBuilder::with_state`].
     pub fn state(&self) -> (&ParseState, &ScopeStack) {
         (&self.parse_state, &self.scope_stack)
     }
