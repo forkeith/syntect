@@ -26,10 +26,15 @@
 /// where only the changed region needs re-parsing.
 ///
 /// ```no_run
+/// use std::io::Write;
 /// use syntect::io::HighlightedWriter;
 /// use syntect::highlighting::ThemeSet;
 /// use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 /// use syntect::rendering::AnsiStyledOutput;
+///
+/// let ss = SyntaxSet::load_defaults_newlines();
+/// let ts = ThemeSet::load_defaults();
+/// let syntax = ss.find_syntax_by_extension("rs").unwrap();
 ///
 /// // 1. Save state at a clean line boundary (not mid-speculation).
 /// let mut w = HighlightedWriter::from_themed(
@@ -39,8 +44,9 @@
 ///     AnsiStyledOutput::Transparent,
 /// )
 /// .build();
-/// w.write_all(b"fn main() {}\n")?;
-/// let cached: (ParseState, ScopeStack) = w.state().clone();
+/// w.write_all(b"fn main() {}\n").unwrap();
+/// let (pstate, sstack) = w.state();
+/// let cached: (ParseState, ScopeStack) = (pstate.clone(), sstack.clone());
 ///
 /// // 2. Later, restore on a new writer and continue from where you left off.
 /// let mut w2 = HighlightedWriter::from_themed(
@@ -51,8 +57,7 @@
 /// )
 /// .with_state(cached.0, cached.1)
 /// .build();
-/// w2.write_all(b"let x = 1;\n")?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// w2.write_all(b"let x = 1;\n").unwrap();
 /// ```
 ///
 /// Caveats:
@@ -70,6 +75,7 @@
 use crate::highlighting::Theme;
 use crate::parsing::{
     lock_global_scope_repo, ParseState, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet,
+    TokenBudget,
 };
 use crate::rendering::{
     render_line, resolve_atom_strs, AnsiStyledOutput, MarkupAdapter, ScopeMarkup, ScopeRenderer,
@@ -77,6 +83,8 @@ use crate::rendering::{
 };
 use crate::Error;
 use std::io::{self, Write};
+use std::num::NonZeroUsize;
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // HighlightedWriter — io::Write-based highlighting driver
@@ -204,6 +212,7 @@ pub struct HighlightedWriter<
     pending_ops: Vec<Vec<(usize, ScopeStackOp)>>,
     scope_stack_snapshot: Option<ScopeStack>,
     open_scopes_snapshot: Option<isize>,
+    budget: Option<TokenBudget>,
 }
 
 impl<'a> HighlightedWriter<'a> {
@@ -285,6 +294,8 @@ pub struct HighlightedWriterBuilder<'a, R: ScopeRenderer, W: io::Write = Vec<u8>
     renderer: R,
     output: W,
     state: Option<(ParseState, ScopeStack)>,
+    token_limit: Option<NonZeroUsize>,
+    time_limit: Option<Duration>,
 }
 
 impl<'a, R: ScopeRenderer> HighlightedWriterBuilder<'a, R, Vec<u8>> {
@@ -295,6 +306,8 @@ impl<'a, R: ScopeRenderer> HighlightedWriterBuilder<'a, R, Vec<u8>> {
             renderer,
             output: Vec::new(),
             state: None,
+            token_limit: None,
+            time_limit: None,
         }
     }
 }
@@ -309,6 +322,8 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriterBuilder<'a, R, W> {
             renderer: self.renderer,
             output,
             state: self.state,
+            token_limit: self.token_limit,
+            time_limit: self.time_limit,
         }
     }
 
@@ -330,6 +345,34 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriterBuilder<'a, R, W> {
         self
     }
 
+    /// Set a maximum token budget per `parse_line` call.
+    ///
+    /// A token is one iteration of the parse loop: a pattern match, an escape match, the
+    /// one-character advance of the loop guard, or a restart after an exhausted branch.
+    /// Zero-width matches count. Tokens spent re-parsing earlier lines after a cross-line
+    /// `fail` count against the same limit.
+    ///
+    /// If a single line would need more than `limit` tokens, parsing stops and returns
+    /// [`crate::parsing::ParsingError::TokenLimitExceeded`]. This turns a pathological syntax that would
+    /// otherwise loop forever into an error the caller can handle.
+    pub fn with_token_limit(mut self, limit: usize) -> Self {
+        self.token_limit = NonZeroUsize::new(limit);
+        self
+    }
+
+    /// Set a maximum wall-clock time per `parse_line` call.
+    ///
+    /// The clock is read once every 256 tokens, so a parse can run up to 255 tokens past
+    /// `timeout` before it stops. Because the result depends on machine speed, prefer
+    /// [`with_token_limit`](Self::with_token_limit) where a reproducible result matters.
+    ///
+    /// If parsing a line takes longer than `timeout`, parsing stops and returns
+    /// [`crate::parsing::ParsingError::TimeLimitExceeded`].
+    pub fn with_time_limit(mut self, timeout: Duration) -> Self {
+        self.time_limit = Some(timeout);
+        self
+    }
+
     /// Materialise the configured [`HighlightedWriter`].
     pub fn build(self) -> HighlightedWriter<'a, R, W> {
         let HighlightedWriterBuilder {
@@ -338,7 +381,31 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriterBuilder<'a, R, W> {
             mut renderer,
             output,
             state,
+            token_limit,
+            time_limit,
         } = self;
+
+        let budget = match (token_limit, time_limit) {
+            (Some(limit), Some(timeout)) => Some(TokenBudget {
+                limit: Some(limit),
+                deadline: Instant::now()
+                    .checked_add(timeout)
+                    .map(|deadline| (deadline, timeout)),
+                ..TokenBudget::unlimited()
+            }),
+            (Some(limit), None) => Some(TokenBudget {
+                limit: Some(limit),
+                ..TokenBudget::unlimited()
+            }),
+            (None, Some(timeout)) => Some(TokenBudget {
+                limit: None,
+                deadline: Instant::now()
+                    .checked_add(timeout)
+                    .map(|deadline| (deadline, timeout)),
+                ..TokenBudget::unlimited()
+            }),
+            (None, None) => None,
+        };
 
         match state {
             None => HighlightedWriter {
@@ -354,6 +421,7 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriterBuilder<'a, R, W> {
                 pending_ops: Vec::new(),
                 scope_stack_snapshot: None,
                 open_scopes_snapshot: None,
+                budget,
             },
             Some((parse_state, scope_stack)) => {
                 // Replay the existing scope stack to the renderer so that
@@ -383,6 +451,7 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriterBuilder<'a, R, W> {
                     pending_ops: Vec::new(),
                     scope_stack_snapshot: None,
                     open_scopes_snapshot: None,
+                    budget,
                 }
             }
         }
@@ -416,7 +485,11 @@ impl<'a, R: ScopeRenderer, W: io::Write> HighlightedWriter<'a, R, W> {
     /// implementation once a complete `\n`-terminated line has been
     /// assembled in the internal buffer.
     fn highlight_line(&mut self, line: &str) -> Result<(), Error> {
-        let parse_output = self.parse_state.parse_line(line, self.syntax_set)?;
+        let mut budget = self.budget.take().unwrap_or_else(TokenBudget::unlimited);
+        let parse_output =
+            self.parse_state
+                .parse_line_budgeted(line, self.syntax_set, &mut budget)?;
+        self.budget = Some(budget);
 
         // If corrected ops arrived from a cross-line fail replay, replace the
         // ops for the affected pending line(s). Each entry in `replayed` is

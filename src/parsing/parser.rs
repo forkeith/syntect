@@ -580,14 +580,14 @@ const TOKENS_PER_CLOCK_CHECK: usize = 256;
 ///
 /// Shared by the current line and by any buffered lines a cross-line `fail` replays
 /// during the same call, so a replay cannot escape the limit.
-struct TokenBudget {
-    tokens: usize,
-    limit: Option<NonZeroUsize>,
-    deadline: Option<(Instant, Duration)>,
+pub struct TokenBudget {
+    pub(crate) tokens: usize,
+    pub(crate) limit: Option<NonZeroUsize>,
+    pub(crate) deadline: Option<(Instant, Duration)>,
 }
 
 impl TokenBudget {
-    fn unlimited() -> Self {
+    pub fn unlimited() -> Self {
         TokenBudget {
             tokens: 0,
             limit: None,
@@ -886,7 +886,7 @@ impl ParseState {
         self.parse_line_budgeted(line, syntax_set, &mut budget)
     }
 
-    fn parse_line_budgeted(
+    pub(crate) fn parse_line_budgeted(
         &mut self,
         line: &str,
         syntax_set: &SyntaxSet,
